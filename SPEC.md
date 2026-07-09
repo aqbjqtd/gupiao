@@ -13,7 +13,7 @@
 | 图表 | Apache ECharts | 金融 K 线图业界标准 |
 | 数据库 | SQLite (aiosqlite) | 零运维，单机够用 |
 | 调度 | APScheduler | 每日收盘后自动刷新数据 |
-| 数据源 | 东方财富 (akshare) → 新浪 API 自动降级 | 双源保障稳定性 |
+| 数据获取 | akshare（接入东方财富）→ 新浪 API 自动降级 | 双源保障稳定性 |
 
 ## 多因子选股策略（五维模型）
 
@@ -40,7 +40,7 @@
 
 ```
 fetch_spot_data()
-├─ [主源] ak.stock_zh_a_spot_em() 东方财富
+├─ [主源] ak.stock_zh_a_spot_em() 接入东方财富
 │    └─ 失败 → 日志记录
 ├─ [降级] Sina API 直连（vf stock.finance.sina.com.cn）
 │    └─ 5528只股票，含PE/PB/市值/换手率
@@ -53,7 +53,7 @@ fetch_kline_data(code)
      └─ 日K线，含MA5/MA10/MA30
 
 fetch_financial_data()
-└─ ak.stock_yjbb_em(date) 财报（含重试）
+└─ ak.stock_yjbb_em() 财报（含重试）
 
 fetch_dividend_data()
 └─ ak.stock_history_dividend() 分红（含重试）
@@ -89,7 +89,7 @@ fetch_dividend_data()
 │   │   │   └── stocks.py        # /api/stocks 路由
 │   │   └── services/
 │   │       ├── __init__.py
-│   │       ├── data_fetcher.py  # 双源数据获取 + SQLite 缓存 + 重试
+│   │       ├── data_fetcher.py  # 双源数据获取（akshare→新浪）+ 重试
 │   │       ├── screener.py      # 五维因子计算 + 评分 + 筛选
 │   │       └── scheduler.py     # APScheduler + 防抖
 │   ├── requirements.txt
@@ -189,5 +189,5 @@ docker compose up --build
 - ✅ `/api/stocks/{code}/kline` 返回 K 线数据（含 MA5/20/60）
 - ✅ 全流程：启动 → 自动刷新 → API 就绪 → K 线图数据
 - ✅ 费率限制：间隔 ≥3s + 抖动 0~3s
-- ✅ 降级机制：东方财富失败 → 新浪自动降级
+- ✅ 降级机制：akshare 失败 → 新浪自动降级
 - ✅ Docker 部署：backend:8000 + nginx:80 反代

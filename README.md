@@ -8,7 +8,7 @@
 |---|------|
 | 后端 | FastAPI + SQLAlchemy async + SQLite |
 | 前端 | React 18 + Vite + TypeScript + ECharts |
-| 数据源 | 东方财富 (akshare) → 新浪 API 自动降级 |
+| 数据获取 | akshare（接入东方财富）→ 新浪 API 自动降级 |
 | 调度 | APScheduler（每日 16:30 自动刷新） |
 
 ## 项目结构
@@ -24,7 +24,7 @@ gupiao/
 │   │   ├── routers/
 │   │   │   └── stocks.py   # API 路由
 │   │   └── services/
-│   │       ├── data_fetcher.py  # 双源数据获取（东方财富→新浪降级）
+│   │       ├── data_fetcher.py  # 双源数据获取（akshare→新浪降级）
 │   │       ├── screener.py      # 五维筛选引擎
 │   │       └── scheduler.py     # 定时调度 + 刷新防抖
 │   └── requirements.txt
@@ -94,12 +94,12 @@ npm run dev
 
 ## 数据源策略
 
-| 数据 | 主源 | 降级 |
-|------|------|------|
-| 实时行情 | 东方财富 (akshare) | → 新浪 API 直连 |
-| 财报 | 东方财富 (akshare stock_yjbb_em) | → 缓存兜底 |
-| 分红 | 东方财富 (akshare stock_history_dividend) | — |
-| K 线 | 东方财富前复权 (adjust='qfq') | → 新浪日K |
+| 数据 | 获取方式 | 降级 |
+|------|----------|------|
+| 实时行情 | akshare（接入东方财富） | → 新浪 API 直连 |
+| 财报 | akshare（接入东方财富） | → 缓存兜底 |
+| 分红 | akshare（接入东方财富） | — |
+| K 线 | akshare 前复权（adjust='qfq'） | → 新浪日K |
 
 - 调用间隔 ≥ 3s + 随机 0~3s 抖动
 - 失败后指数退避重试（5s → 10s → 20s → 40s → 80s）
