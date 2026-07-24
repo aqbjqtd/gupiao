@@ -89,7 +89,6 @@ npm run dev
 | GET | `/api/stocks/{code}` | 个股详情 |
 | GET | `/api/stocks/{code}/kline?months=12` | 前复权 K 线（支持 6/12/24/60月） |
 | GET | `/api/stocks/{code}/financial` | 财务数据 |
-| POST | `/api/refresh` | 手动触发刷新 |
 | GET | `/api/refresh/status` | 刷新状态 |
 
 ## 数据源策略
