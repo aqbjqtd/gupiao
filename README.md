@@ -9,7 +9,7 @@
 | 后端 | FastAPI + SQLAlchemy async + SQLite |
 | 前端 | React 18 + Vite + TypeScript + ECharts |
 | 数据获取 | akshare（接入东方财富）→ 新浪 API 自动降级 |
-| 调度 | APScheduler（每日 16:30 自动刷新） |
+| 调度 | APScheduler（工作日 11:00 午盘 + 14:30 尾盘双刷新） |
 
 ## 项目结构
 
