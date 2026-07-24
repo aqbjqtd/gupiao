@@ -85,6 +85,13 @@ async def get_kline(code: str, months: int = Query(12, ge=1, le=60)):
     if data is None:
         raise HTTPException(status_code=500, detail="获取 K 线数据失败")
 
+    import math
+    # Final safety: sanitize any remaining NaN/Inf values
+    for row in data:
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                row[k] = None
+
     return {
         "code": code,
         "name": stock.name,

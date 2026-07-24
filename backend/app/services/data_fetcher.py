@@ -610,9 +610,9 @@ def _build_kline(df: pd.DataFrame, **col_map) -> list[dict]:
             "low": _clean_float(r[col_map["low_col"]]),
             "close": _clean_float(r[col_map["close_col"]]),
             "volume": _clean_float(r[col_map["volume_col"]]),
-            "ma5": ma5[i],
-            "ma20": ma20[i],
-            "ma60": ma60[i],
+            "ma5": _clean_float(ma5[i]),
+            "ma20": _clean_float(ma20[i]),
+            "ma60": _clean_float(ma60[i]),
         })
     return rows
 
