@@ -13,10 +13,6 @@ backend/.env
 # Single-container data volume
 data/
 
-# Project root env (ghcr.io token)
-.env
-.env.template
-
 # Frontend
 frontend/node_modules/
 frontend/dist/
