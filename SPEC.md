@@ -115,9 +115,8 @@ fetch_dividend_data()
 │   ├── dist/                      # 构建产物
 │   ├── package.json
 │   └── vite.config.ts
-├── docker-compose.yml       # [开发] 双容器方案
-├── nginx.conf               # 仅双容器方案需要
-├── docker-compose.allinone.yml  # [部署] 单容器方案
+├── docker-compose.yml       # 单容器部署（默认）
+├── nginx.conf               # 仅旧双容器方案需要
 ├── Dockerfile.allinone      # 多阶段构建（前端+后端合并）
 ├── SPEC.md
 └── README.md
@@ -178,21 +177,12 @@ fetch_dividend_data()
 
 ## 部署方式
 
-### 单容器（推荐，VPS 友好）
-
 ```bash
-docker compose -f docker-compose.allinone.yml up --build
+docker compose up --build
 # 首次启动等待 5-7 分钟数据同步
 ```
 
-访问 http://localhost:18080（默认部署端口）
-
-### 双容器（本地开发）
-
-```bash
-docker compose up --build
-# 前端 :80，后端 :8000
-```
+访问 http://localhost:18080（默认端口）
 
 ## 验收结果（已通过）
 

@@ -1,25 +1,10 @@
-
 services:
-  backend:
+  gupiao:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.allinone
     ports:
-      - "8000:8000"
+      - "18080:8000"
     volumes:
-      - ./backend/data:/app/data
-    environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/gupiao.db
-      - DATA_DIR=./data
-    restart: unless-stopped
-
-  frontend:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./frontend/dist:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - backend
+      - ./data:/app/data
     restart: unless-stopped

@@ -35,10 +35,9 @@ gupiao/
 │   │   ├── api/            # API 封装
 │   │   └── styles/         # 深色金融主题 CSS
 │   └── package.json
-├── docker-compose.yml       # [开发] backend(8000) + nginx(80)
-├── docker-compose.allinone.yml  # [部署] 单容器(host:18080→container:8000)
+├── docker-compose.yml       # 单容器部署（默认）
 ├── Dockerfile.allinone      # 多阶段构建（前端+后端合并）
-├── nginx.conf               # 仅双容器方案需要
+├── nginx.conf               # 仅旧双容器方案需要
 └── README.md
 ```
 
@@ -75,19 +74,11 @@ gupiao/
 ### 单容器部署（推荐，VPS 友好）
 
 ```bash
-docker compose -f docker-compose.allinone.yml up --build
+docker compose up --build
 # 首次启动等待 5-7 分钟自动拉取数据
 ```
 
-访问 http://localhost:18080（默认 VPS 部署端口 18080）
-
-### 双容器开发（本地调试）
-
-```bash
-docker compose up --build
-```
-
-前端: http://localhost:80 | 后端: http://localhost:8000
+访问 http://localhost:18080（默认端口）
 
 ### 本地开发
 
