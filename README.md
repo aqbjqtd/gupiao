@@ -9,7 +9,7 @@
 | 后端 | FastAPI + SQLAlchemy async + SQLite |
 | 前端 | React 18 + Vite + TypeScript + ECharts |
 | 数据获取 | akshare（接入东方财富）→ 新浪 API 自动降级 |
-| 调度 | APScheduler（工作日 11:00 午盘 + 14:30 尾盘双刷新） |
+| 调度 | APScheduler（工作日 11:30 午盘 + 14:00 午后刷新） |
 
 ## 项目结构
 
@@ -35,8 +35,10 @@ gupiao/
 │   │   ├── api/            # API 封装
 │   │   └── styles/         # 深色金融主题 CSS
 │   └── package.json
-├── docker-compose.yml       # backend(8000) + nginx(80)
-├── nginx.conf               # 反代配置：/api/ → backend
+├── docker-compose.yml       # [开发] backend(8000) + nginx(80)
+├── docker-compose.allinone.yml  # [部署] 单容器(host:18080→container:8000)
+├── Dockerfile.allinone      # 多阶段构建（前端+后端合并）
+├── nginx.conf               # 仅双容器方案需要
 └── README.md
 ```
 
@@ -70,15 +72,22 @@ gupiao/
 
 ## 快速开始
 
-### Docker Compose（推荐）
+### 单容器部署（推荐，VPS 友好）
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.allinone.yml up --build
 # 首次启动等待 5-7 分钟自动拉取数据
 ```
 
-前端: http://localhost:80（自动轮询等待数据就绪）
-后端: http://localhost:8000
+访问 http://localhost:18080（默认 VPS 部署端口 18080）
+
+### 双容器开发（本地调试）
+
+```bash
+docker compose up --build
+```
+
+前端: http://localhost:80 | 后端: http://localhost:8000
 
 ### 本地开发
 

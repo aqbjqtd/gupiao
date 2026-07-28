@@ -1,0 +1,42 @@
+# ===== Stage 1: 构建前端 =====
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ===== Stage 2: Python 依赖 =====
+FROM python:3.11-alpine AS python-builder
+WORKDIR /app
+RUN apk add --no-cache gcc musl-dev curl-dev libxml2-dev libxslt-dev linux-headers
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir --no-compile -r requirements.txt \
+    && rm -rf /usr/local/lib/python3.11/site-packages/pip \
+              /usr/local/lib/python3.11/site-packages/setuptools* \
+              /usr/local/lib/python3.11/site-packages/wheel*
+
+# ===== Stage 3: 运行时（单容器，前端+后端合并）=====
+FROM python:3.11-alpine
+RUN apk add --no-cache libcurl libxml2 libxslt
+WORKDIR /app
+
+# Python 依赖
+COPY --from=python-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=python-builder /usr/local/bin /usr/local/bin
+
+# 后端代码
+COPY backend/app/ ./app/
+
+# 前端构建产物（FRONTEND_DIR 环境变量指定路径）
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+RUN mkdir -p data
+
+ENV FRONTEND_DIR=/app/frontend/dist
+ENV DATABASE_URL=sqlite+aiosqlite:///./data/gupiao.db
+ENV DATA_DIR=./data
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

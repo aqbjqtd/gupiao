@@ -64,10 +64,13 @@ export default function Home() {
     <div className="home-page">
       <div className="page-header">
         <div className="page-title">
-          <h2>量化选股 · Top 20</h2>
-          {lastRefresh && (
-            <span className="refresh-info">上次更新：{lastRefresh}</span>
-          )}
+          <h2>
+            量化选股 · Top 20
+            <span className="title-sub">
+              （数据每个交易日 11:30/14:00 自动更新
+              {lastRefresh && <>, 最近更新：{lastRefresh}</>}）
+            </span>
+          </h2>
         </div>
       </div>
 

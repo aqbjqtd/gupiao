@@ -85,23 +85,23 @@ async def run_full_refresh():
 
 def start_scheduler():
     """启动 APScheduler"""
-    # 午盘刷新（工作日 11:00）
+    # 午盘刷新（工作日 11:30 午盘收盘）
     scheduler.add_job(
         run_full_refresh,
-        CronTrigger(hour=11, minute=0, day_of_week='mon-fri'),
+        CronTrigger(hour=11, minute=30, day_of_week='mon-fri'),
         id="morning_refresh",
         replace_existing=True,
     )
-    logger.info("定时任务已注册：工作日 11:00 午盘刷新")
+    logger.info("定时任务已注册：工作日 11:30 午盘刷新")
 
-    # 尾盘刷新（工作日 14:30）
+    # 午后刷新（工作日 14:00 午后走稳）
     scheduler.add_job(
         run_full_refresh,
-        CronTrigger(hour=14, minute=30, day_of_week='mon-fri'),
+        CronTrigger(hour=14, minute=0, day_of_week='mon-fri'),
         id="afternoon_refresh",
         replace_existing=True,
     )
-    logger.info("定时任务已注册：工作日 14:30 尾盘刷新")
+    logger.info("定时任务已注册：工作日 14:00 午后刷新")
 
     # 启动前检查是否有缓存，无缓存则立即执行首次刷新
     scheduler.start()

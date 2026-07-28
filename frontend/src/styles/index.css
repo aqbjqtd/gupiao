@@ -127,10 +127,11 @@ body {
   color: #F0B90B;
 }
 
-.refresh-info {
-  font-size: 0.8rem;
+.title-sub {
+  font-size: 0.85rem;
+  font-weight: 400;
   color: #888;
-  margin-left: 12px;
+  margin-left: 8px;
 }
 
 .refresh-btn {

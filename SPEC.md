@@ -115,8 +115,10 @@ fetch_dividend_data()
 │   ├── dist/                      # 构建产物
 │   ├── package.json
 │   └── vite.config.ts
-├── docker-compose.yml
-├── nginx.conf
+├── docker-compose.yml       # [开发] 双容器方案
+├── nginx.conf               # 仅双容器方案需要
+├── docker-compose.allinone.yml  # [部署] 单容器方案
+├── Dockerfile.allinone      # 多阶段构建（前端+后端合并）
 ├── SPEC.md
 └── README.md
 ```
@@ -168,7 +170,7 @@ fetch_dividend_data()
 
 ## 调度策略
 
-- 每日 16:30 自动刷新（APScheduler）
+- 每日 11:30 午盘 + 14:00 午后自动刷新（APScheduler）
 - 启动时 5s 后后台首次刷新（不阻塞启动）
 - 缓存有效期：行情 4h、财报 24h、分红 24h
 - 两次全刷新最小间隔 5 分钟（防抖）
@@ -176,9 +178,20 @@ fetch_dividend_data()
 
 ## 部署方式
 
+### 单容器（推荐，VPS 友好）
+
+```bash
+docker compose -f docker-compose.allinone.yml up --build
+# 首次启动等待 5-7 分钟数据同步
+```
+
+访问 http://localhost:18080（默认部署端口）
+
+### 双容器（本地开发）
+
 ```bash
 docker compose up --build
-# 首次启动等待 5-7 分钟数据同步
+# 前端 :80，后端 :8000
 ```
 
 ## 验收结果（已通过）
@@ -190,4 +203,4 @@ docker compose up --build
 - ✅ 全流程：启动 → 自动刷新 → API 就绪 → K 线图数据
 - ✅ 费率限制：间隔 ≥3s + 抖动 0~3s
 - ✅ 降级机制：akshare 失败 → 新浪自动降级
-- ✅ Docker 部署：backend:8000 + nginx:80 反代
+- ✅ 单容器部署：host:18080 → container:8000（前后端合一）

@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     # 连接超时
     akshare_timeout: int = 120        # 单次 akshare 调用超时（秒）
 
-    # 排序调度
-    refresh_hour: int = 16
+    # 调度（实际定时在 scheduler.py 中硬编码，此值作参考）
+    refresh_hour: int = 11
     refresh_minute: int = 30
 
     # 硬过滤参数

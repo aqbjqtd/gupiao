@@ -10,9 +10,13 @@ backend/__pycache__/
 backend/data/
 backend/.env
 
+# Single-container data volume
+data/
+
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # IDE
 .vscode/

@@ -2,7 +2,7 @@
 # K线接口冒烟测试 — 检测 Top 20 股票 K 线接口是否正常
 # 退出码: 0=全部通过, 1=有失败
 
-BASE_URL="${KLINE_SMOKE_URL:-http://localhost:8000}"
+BASE_URL="${KLINE_SMOKE_URL:-http://localhost:18080}"
 FAIL=0
 TOTAL=0
 ERRORS=""

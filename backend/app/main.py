@@ -14,6 +14,12 @@ from app.routers.stocks import router as stocks_router
 from app.services.scheduler import start_scheduler, shutdown_scheduler, run_full_refresh
 from app.config import settings
 
+# 单容器模式下提供前端静态文件服务
+_FRONTEND_DIR = os.getenv("FRONTEND_DIR", "")
+if _FRONTEND_DIR and os.path.isdir(_FRONTEND_DIR):
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse as _FileResponse
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -74,6 +80,20 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(stocks_router, prefix="/api", tags=["股票"])
+
+# 单容器模式：服务前端静态文件（仅在 FRONTEND_DIR 有效时启用）
+if _FRONTEND_DIR and os.path.isdir(_FRONTEND_DIR):
+    assets_dir = os.path.join(_FRONTEND_DIR, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    logger.info("前端静态文件服务已启用: %s", _FRONTEND_DIR)
+
+    @app.get("/{full_path:path}")
+    async def _serve_frontend(full_path: str):
+        file_path = os.path.join(_FRONTEND_DIR, full_path)
+        if full_path and os.path.isfile(file_path):
+            return _FileResponse(file_path, headers={"Cache-Control": "public, max-age=3600"})
+        return _FileResponse(os.path.join(_FRONTEND_DIR, "index.html"))
 
 
 if __name__ == "__main__":
