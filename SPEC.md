@@ -116,7 +116,6 @@ fetch_dividend_data()
 │   ├── package.json
 │   └── vite.config.ts
 ├── docker-compose.yml       # 单容器部署（默认）
-├── nginx.conf               # 仅旧双容器方案需要
 ├── Dockerfile.allinone      # 多阶段构建（前端+后端合并）
 ├── SPEC.md
 └── README.md

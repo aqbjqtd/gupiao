@@ -5,7 +5,7 @@ from typing import List, Dict, Tuple
 import pandas as pd
 import numpy as np
 
-from app.database import ScreenResult, FinancialData, async_session
+from app.database import ScreenResult, async_session
 from app.config import settings
 from sqlalchemy import select
 
@@ -83,9 +83,16 @@ def run_screener(spot_df: pd.DataFrame, fin_df: pd.DataFrame,
                  "industry", "turnover_rate", "high_60d"]
     spot_df = spot_df[[c for c in spot_cols if c in spot_df.columns]].copy()
 
-    # 财报取最近一年（按 ROE 最新为准，每组取第一条）
-    fin_latest = fin_df.sort_values("code").groupby("code").first().reset_index()
-    fin_cols = ["code", "roe", "gross_margin", "revenue_growth", "profit_growth"]
+    # 财报取最新一期（按报告年份倒序，每组取第一条）
+    if "year" in fin_df.columns:
+        fin_latest = (
+            fin_df.sort_values(["code", "year"], ascending=[True, False])
+            .groupby("code").first().reset_index()
+        )
+    else:
+        fin_latest = fin_df.sort_values("code").groupby("code").first().reset_index()
+    fin_cols = ["code", "roe", "gross_margin", "revenue_growth",
+                "profit_growth", "revenue", "cf_ps"]
     fin_latest = fin_latest[[c for c in fin_cols if c in fin_latest.columns]]
 
     # 分红数据：取各股年均股息均值
@@ -95,6 +102,12 @@ def run_screener(spot_df: pd.DataFrame, fin_df: pd.DataFrame,
     # 合并
     merged = spot_df.merge(fin_latest, on="code", how="left")
     merged = merged.merge(div_agg, on="code", how="left")
+
+    # PS = 市值 / 营收（市值单位为亿元，营收单位为元）
+    merged["ps"] = merged["market_cap"] * 1e8 / merged["revenue"]
+    # 缺失营收数据时回退用 PE 近似（避免估值因子整列 NaN）
+    bad_ps = merged["ps"].isna() | np.isinf(merged["ps"])
+    merged["ps"] = merged["ps"].where(~bad_ps, merged["pe"])
 
     # ---------- 2. 硬过滤 ----------
     logger.info("应用硬过滤条件……")
@@ -163,7 +176,11 @@ def _calculate_scores(df: pd.DataFrame) -> Dict[str, pd.Series]:
     # ---- 质量评分（越高越好） ----
     roe_score = _percentile_rank(df["roe"].fillna(df["roe"].median()))
     gm_score = _percentile_rank(df["gross_margin"].fillna(df["gross_margin"].median()))
-    cf_score = _percentile_rank(df["roe"].fillna(df["roe"].median()))
+    if df["cf_ps"].notna().any():
+        cf_score = _percentile_rank(df["cf_ps"].fillna(df["cf_ps"].median()))
+    else:
+        # 现金流数据缺失时回退用 ROE 近似
+        cf_score = roe_score
     result["quality"] = (roe_score * SUB_WEIGHTS["quality"]["roe"]
                          + gm_score * SUB_WEIGHTS["quality"]["gross_margin"]
                          + cf_score * SUB_WEIGHTS["quality"]["cf_quality"])
@@ -177,7 +194,8 @@ def _calculate_scores(df: pd.DataFrame) -> Dict[str, pd.Series]:
     # ---- 估值评分（越低越好） ----
     pe_score = _reverse_percentile_rank(df["pe"].clip(upper=df["pe"].quantile(0.95)))
     pb_score = _reverse_percentile_rank(df["pb"].clip(upper=df["pb"].quantile(0.95)))
-    ps_score = _reverse_percentile_rank(df["pe"].clip(upper=df["pe"].quantile(0.95)))
+    ps_col = df["ps"] if df["ps"].notna().any() else df["pe"]
+    ps_score = _reverse_percentile_rank(ps_col.clip(upper=ps_col.quantile(0.95)))
     result["value"] = (pe_score * SUB_WEIGHTS["value"]["pe"]
                        + pb_score * SUB_WEIGHTS["value"]["pb"]
                        + ps_score * SUB_WEIGHTS["value"]["ps"])

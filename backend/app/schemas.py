@@ -1,6 +1,6 @@
 """Pydantic 响应模型"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 
 
@@ -27,14 +27,13 @@ class StockItem(BaseModel):
     momentum_score: Optional[float] = None
     rank: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class KlineItem(BaseModel):
     """K 线数据"""
     date: str
-    open_: float
+    open: float
     high: float
     low: float
     close: float

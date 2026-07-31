@@ -50,8 +50,18 @@ export interface RefreshStatus {
   message: string;
 }
 
+export interface FinancialHistoryItem {
+  quarter: string;
+  revenue: number | null;
+  profit: number | null;
+  roe: number | null;
+  gross_margin: number | null;
+  revenue_growth: number | null;
+  profit_growth: number | null;
+}
+
 export interface StockDetail extends StockItem {
-  financials: any[];
+  financials: FinancialHistoryItem[];
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

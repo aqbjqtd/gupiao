@@ -103,9 +103,8 @@ def start_scheduler():
     )
     logger.info("定时任务已注册：工作日 14:00 午后刷新")
 
-    # 启动前检查是否有缓存，无缓存则立即执行首次刷新
     scheduler.start()
-    logger.info("调度器已启动")
+    logger.info("调度器已启动（首次刷新由应用 lifespan 中的 _initial_refresh 延迟 5s 执行）")
 
 
 async def shutdown_scheduler():

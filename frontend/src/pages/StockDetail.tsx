@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { fetchStockDetail, fetchKline, StockDetail, KlineResponse } from '../api/stocks';
+import { fetchStockDetail, fetchKline, StockDetail, KlineResponse, FinancialHistoryItem } from '../api/stocks';
 import StockCard from '../components/StockCard';
 import KLineChart from '../components/KLineChart';
-import * as echarts from 'echarts';
+import { echarts } from '../lib/echarts';
+import type { EChartsType, EChartsOption } from '../lib/echarts';
 import { useRef, useCallback } from 'react';
 
 export default function StockDetailPage() {
@@ -14,7 +15,7 @@ export default function StockDetailPage() {
   const [loading, setLoading] = useState(true);
   const [klineLoading, setKlineLoading] = useState(false);
   const radarRef = useRef<HTMLDivElement>(null);
-  const radarInstance = useRef<echarts.ECharts | null>(null);
+  const radarInstance = useRef<EChartsType | null>(null);
 
   useEffect(() => {
     if (!code) return;
@@ -44,7 +45,7 @@ export default function StockDetailPage() {
     const chart = radarInstance.current;
 
     const maxScore = 100;
-    const option: echarts.EChartsOption = {
+    const option: EChartsOption = {
       backgroundColor: 'transparent',
       radar: {
         indicator: [
@@ -140,7 +141,7 @@ export default function StockDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {detail.financials.map((f: any, i: number) => (
+                {detail.financials.map((f: FinancialHistoryItem, i: number) => (
                   <tr key={i}>
                     <td>{f.quarter || '—'}</td>
                     <td className="mono">{f.revenue?.toFixed(2) ?? '—'}</td>

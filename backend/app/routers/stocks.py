@@ -1,16 +1,18 @@
 """股票相关 API 路由"""
 
+import asyncio
 import logging
+import math
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 
-from app.database import async_session, ScreenResult, init_db
-from app.services.data_fetcher import fetch_kline_data
+from app.database import async_session, ScreenResult
+from app.services.data_fetcher import fetch_financial_data
+from app.services.kline import fetch_kline_data
 from app.services.scheduler import run_full_refresh, get_refresh_status
-from app.schemas import StockItem, KlineResponse, KlineItem, StockDetail, RefreshStatus
+from app.schemas import StockItem, KlineResponse, StockDetail, RefreshStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,7 +36,7 @@ async def get_stocks():
 
 @router.get("/stocks/{code}", response_model=StockDetail)
 async def get_stock_detail(code: str):
-    """获取个股详情（含五维评分）"""
+    """获取个股详情（含五维评分 + 财务历史）"""
     code = code.zfill(6)
     async with async_session() as session:
         stmt = select(ScreenResult).where(ScreenResult.code == code)
@@ -44,10 +46,7 @@ async def get_stock_detail(code: str):
     if not stock:
         raise HTTPException(status_code=404, detail="股票不存在")
 
-    # 查询财务数据（从缓存财务表取最近4季）
-    financials = []
-    # 这个项目暂时用相同财务表的历史数据，简单返回空或示例
-    # 实际可以做更复杂的财务历史查询
+    financials = await _get_financial_history(code)
 
     return StockDetail(
         code=stock.code,
@@ -69,7 +68,7 @@ async def get_stock_detail(code: str):
     )
 
 
-@router.get("/stocks/{code}/kline")
+@router.get("/stocks/{code}/kline", response_model=KlineResponse)
 async def get_kline(code: str, months: int = Query(12, ge=1, le=60)):
     """获取前复权 K 线数据"""
     code = code.zfill(6)
@@ -85,7 +84,6 @@ async def get_kline(code: str, months: int = Query(12, ge=1, le=60)):
     if data is None:
         raise HTTPException(status_code=500, detail="获取 K 线数据失败")
 
-    import math
     # Final safety: sanitize any remaining NaN/Inf values
     for row in data:
         for k, v in row.items():
@@ -102,22 +100,14 @@ async def get_kline(code: str, months: int = Query(12, ge=1, le=60)):
 
 @router.get("/stocks/{code}/financial")
 async def get_financial(code: str):
-    """获取个股财务数据"""
+    """获取个股财务数据（最近几期）"""
     code = code.zfill(6)
-    # 从财报缓存中获取
-    from app.services.data_fetcher import fetch_financial_data
-    fin_df = await fetch_financial_data()
-    if fin_df is not None and not fin_df.empty:
-        stock_fin = fin_df[fin_df["code"] == code]
-        if not stock_fin.empty:
-            return stock_fin.head(4).to_dict(orient="records")
-    return []
+    return await _get_financial_history(code)
 
 
 @router.post("/refresh")
 async def trigger_refresh():
     """手动触发刷新"""
-    import asyncio
     asyncio.ensure_future(run_full_refresh())
     return {"message": "刷新任务已启动", "status": get_refresh_status()}
 
@@ -131,3 +121,34 @@ async def refresh_status():
         last_refresh=status["last_refresh"],
         message=status["message"],
     )
+
+
+def _clean_json_float(val):
+    """NaN/Inf → None，保证 JSON 合法。"""
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return None
+    return val
+
+
+async def _get_financial_history(code: str) -> list[dict]:
+    """从财报缓存取该股最近几期数据（含报告年份）。"""
+    fin_df = await fetch_financial_data()
+    if fin_df is None or fin_df.empty or "year" not in fin_df.columns:
+        return []
+    stock_fin = fin_df[fin_df["code"] == code]
+    if stock_fin.empty:
+        return []
+    stock_fin = stock_fin.sort_values("year", ascending=False).head(4)
+
+    records = []
+    for _, row in stock_fin.iterrows():
+        records.append({
+            "quarter": f"{int(row['year'])}年报",
+            "revenue": _clean_json_float(row.get("revenue")),
+            "profit": _clean_json_float(row.get("profit")),
+            "roe": _clean_json_float(row.get("roe")),
+            "gross_margin": _clean_json_float(row.get("gross_margin")),
+            "revenue_growth": _clean_json_float(row.get("revenue_growth")),
+            "profit_growth": _clean_json_float(row.get("profit_growth")),
+        })
+    return records

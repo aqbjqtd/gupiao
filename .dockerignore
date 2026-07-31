@@ -1,0 +1,9 @@
+.git
+.gitignore
+data
+frontend/node_modules
+frontend/dist
+backend/.venv
+graphify-out
+**/__pycache__
+**/*.pyc

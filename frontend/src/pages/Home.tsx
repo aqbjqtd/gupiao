@@ -7,7 +7,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<string | null>('rank');
+  const [sortField, setSortField] = useState<keyof StockItem | null>('rank');
   const [sortAsc, setSortAsc] = useState(true);
 
   const loadStocks = useCallback(async () => {
@@ -36,7 +36,7 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [loadStocks, loadStatus]);
 
-  const handleSort = (field: string) => {
+  const handleSort = (field: keyof StockItem) => {
     if (sortField === field) {
       setSortAsc(!sortAsc);
     } else {
@@ -49,14 +49,14 @@ export default function Home() {
   let sortedStocks = [...stocks];
   if (sortField) {
     sortedStocks.sort((a, b) => {
-      const aVal = (a as any)[sortField];
-      const bVal = (b as any)[sortField];
+      const aVal = a[sortField];
+      const bVal = b[sortField];
       if (aVal === null || aVal === undefined) return 1;
       if (bVal === null || bVal === undefined) return -1;
-      if (typeof aVal === 'string') {
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
         return sortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       }
-      return sortAsc ? aVal - bVal : bVal - aVal;
+      return sortAsc ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
     });
   }
 
@@ -71,6 +71,11 @@ export default function Home() {
               {lastRefresh && <>, 最近更新：{lastRefresh}</>}）
             </span>
           </h2>
+        </div>
+        <div className="holding-hint">
+          <span className="hint-icon">📊</span>
+          五维权重：质量35% + 分红20% + 估值20%（价值投资占75%）
+          — 适合中长期持有（1～6个月）
         </div>
       </div>
 

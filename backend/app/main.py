@@ -73,7 +73,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # 单容器同源部署，无需携带凭据的跨域请求
     allow_methods=["*"],
     allow_headers=["*"],
 )

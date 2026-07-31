@@ -134,6 +134,22 @@ body {
   margin-left: 8px;
 }
 
+/* 持仓周期提示 */
+.holding-hint {
+  font-size: 0.82rem;
+  color: #999;
+  margin-top: 6px;
+  padding: 6px 12px;
+  background: rgba(240, 185, 11, 0.05);
+  border-left: 3px solid rgba(240, 185, 11, 0.3);
+  border-radius: 0 4px 4px 0;
+  line-height: 1.5;
+}
+
+.hint-icon {
+  margin-right: 6px;
+}
+
 .refresh-btn {
   background: linear-gradient(135deg, #F0B90B, #d4a504);
   color: #111;

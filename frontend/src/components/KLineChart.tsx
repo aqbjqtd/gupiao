@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import * as echarts from 'echarts';
 import { KlineItem } from '../api/stocks';
+import { echarts } from '../lib/echarts';
+import type { EChartsType, EChartsOption } from '../lib/echarts';
 
 interface Props {
   data: KlineItem[];
@@ -10,7 +11,7 @@ interface Props {
 
 export default function KLineChart({ data, months, onMonthsChange }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const instanceRef = useRef<echarts.ECharts | null>(null);
+  const instanceRef = useRef<EChartsType | null>(null);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -26,7 +27,7 @@ export default function KLineChart({ data, months, onMonthsChange }: Props) {
     const ma20 = data.map(d => d.ma20);
     const ma60 = data.map(d => d.ma60);
 
-    const option: echarts.EChartsOption = {
+    const option: EChartsOption = {
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'axis',
@@ -131,7 +132,8 @@ export default function KLineChart({ data, months, onMonthsChange }: Props) {
               const idx = params.dataIndex;
               const k = kData[idx];
               if (!k) return '#26a69a';
-              return k[0] > k[1] ? '#ef5350' : '#26a69a';
+              // 与蜡烛颜色一致：上涨日（close >= open）红，下跌日绿
+              return k[1] >= k[0] ? '#ef5350' : '#26a69a';
             },
           },
         },

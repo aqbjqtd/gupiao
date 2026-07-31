@@ -3,9 +3,9 @@ import { StockItem } from '../api/stocks';
 
 interface Props {
   stocks: StockItem[];
-  sortField: string | null;
+  sortField: keyof StockItem | null;
   sortAsc: boolean;
-  onSort: (field: string) => void;
+  onSort: (field: keyof StockItem) => void;
 }
 
 function fmt(val: number | null, decimals: number = 2, suffix: string = ''): string {
@@ -21,7 +21,7 @@ function fmtPrice(val: number | null): string {
 export default function StockTable({ stocks, sortField, sortAsc, onSort }: Props) {
   const navigate = useNavigate();
 
-  const sortArrow = (field: string) => {
+  const sortArrow = (field: keyof StockItem) => {
     if (sortField !== field) return '';
     return sortAsc ? ' ↑' : ' ↓';
   };

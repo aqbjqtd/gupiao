@@ -9,101 +9,25 @@
   6. 全流程异常保护：单 endpoint 失败不影响整体
 """
 
-import json
-import asyncio
-import random
-import time
 import logging
-from datetime import datetime, timedelta
-from typing import Optional, Any, Callable
+from datetime import datetime
+from typing import Optional
 
 import akshare as ak
 import pandas as pd
 import httpx
-from sqlalchemy import delete
 
-from app.database import StockCache, async_session
 from app.config import settings
+from app.services.cache import get_cache, get_cache_stale, set_cache
+from app.services.numeric import safe_float
+from app.services.rate_limit import (
+    rate_limit,
+    async_retry,
+    run_akshare,
+    akshare_with_retry,
+)
 
 logger = logging.getLogger(__name__)
-
-# ========================================================================
-# 全局速率限制器（每个 endpoint 独立追踪）
-# ========================================================================
-_last_call_times: dict[str, float] = {}
-_lock = asyncio.Lock()
-
-
-async def _rate_limit(endpoint: str = "default"):
-    """等待直到可以安全调用。间隔 ≥3s + 随机 0~3s 抖动防检测。"""
-    async with _lock:
-        now = time.monotonic()
-        base = settings.akshare_interval  # 3s
-        jitter = random.uniform(0, settings.akshare_interval_jitter)  # 0~3s
-        min_interval = base + jitter  # 3~6s
-
-        # 检查所有 endpoint 的上次调用时间（全局协调）
-        wait = 0.0
-        for name, last in list(_last_call_times.items()):
-            elapsed = now - last
-            needed = min_interval - elapsed
-            if needed > wait:
-                wait = needed
-
-        if wait > 0:
-            logger.debug(f"速率限制：等待 {wait:.1f}s (endpoint={endpoint})")
-            await asyncio.sleep(wait)
-        _last_call_times[endpoint] = time.monotonic()
-
-
-# ========================================================================
-# 指数退避 + 全抖动重试
-# ========================================================================
-async def _async_retry(fn: Callable, *args, **kwargs):
-    """指数退避 + 全抖动重试包装器。
-    
-    退避序列：5s, 10s, 20s, 40s, 80s（上限 120s）
-    """
-    max_attempts = settings.retry_max_attempts  # 5
-    base_delay = settings.retry_base_delay      # 5s
-    max_delay = settings.retry_max_delay         # 120s
-    last_exc = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            return await fn(*args, **kwargs)
-        except Exception as e:
-            last_exc = e
-            if attempt < max_attempts:
-                # 指数退避，全抖动（full jitter）
-                cap = min(max_delay, base_delay * (2 ** (attempt - 1)))
-                sleep_sec = random.uniform(0, cap)
-                logger.warning(
-                    f"请求失败 (attempt {attempt}/{max_attempts}): {str(e)[:120]} "
-                    f"— 等待 {sleep_sec:.1f}s 后重试"
-                )
-                await asyncio.sleep(sleep_sec)
-    # 所有重试均失败
-    raise last_exc
-
-
-# ========================================================================
-# akshare 阻塞函数桥接（在 executor 中运行）
-# ========================================================================
-async def _run_akshare(func: Callable, *args, **kwargs):
-    """在线程池 executor 中运行阻塞的 akshare 调用，带超时保护。"""
-    loop = asyncio.get_running_loop()
-    return await asyncio.wait_for(
-        loop.run_in_executor(None, lambda: func(*args, **kwargs)),
-        timeout=settings.akshare_timeout,  # 120s
-    )
-
-
-async def _akshare_with_retry(endpoint: str, func: Callable, *args, **kwargs):
-    """akshare 统一调用：速率限制 + 指数退避重试。"""
-    async def _call():
-        await _rate_limit(endpoint)
-        return await _run_akshare(func, *args, **kwargs)
-    return await _async_retry(_call)
 
 
 # ========================================================================
@@ -155,7 +79,7 @@ def _normalize_em_spot(df: pd.DataFrame) -> pd.DataFrame:
 async def _fetch_spot_em() -> Optional[pd.DataFrame]:
     """通过 akshare 获取东方财富全市场行情。"""
     logger.info("[东方财富源] 开始获取全市场实时行情……")
-    df = await _akshare_with_retry("spot_em", ak.stock_zh_a_spot_em)
+    df = await akshare_with_retry("spot_em", ak.stock_zh_a_spot_em)
     if df is None or df.empty:
         logger.warning("[东方财富源] 返回空数据")
         return None
@@ -201,7 +125,7 @@ async def _fetch_spot_sina() -> Optional[pd.DataFrame]:
         if not first:
             return all_stocks
         for page in range(2, 60):
-            await _rate_limit("sina_spot")
+            await rate_limit("sina_spot")
             try:
                 data = await _fetch_sina_page(page, 100)
                 if not data:
@@ -214,7 +138,7 @@ async def _fetch_spot_sina() -> Optional[pd.DataFrame]:
         return all_stocks
 
     try:
-        all_stocks = await _async_retry(_fetch_all)
+        all_stocks = await async_retry(_fetch_all)
     except Exception as e:
         logger.error(f"[新浪源] 完全失败: {e}")
         return None
@@ -237,17 +161,17 @@ def _normalize_sina_spot(data: list[dict]) -> pd.DataFrame:
             row = {
                 "code": str(item.get("code", "")).zfill(6),
                 "name": str(item.get("name", "")),
-                "price": _safe_float(item.get("trade")),
-                "change_pct": _safe_float(item.get("changepercent")),
-                "pe": _safe_float(item.get("per")),
-                "pb": _safe_float(item.get("pb")),
+                "price": safe_float(item.get("trade")),
+                "change_pct": safe_float(item.get("changepercent")),
+                "pe": safe_float(item.get("per")),
+                "pb": safe_float(item.get("pb")),
                 # mktcap 单位是万元 → 亿
                 "market_cap": (
-                    _safe_float(item.get("mktcap"), 0) / 10000
-                    if _safe_float(item.get("mktcap"))
+                    safe_float(item.get("mktcap"), 0) / 10000
+                    if safe_float(item.get("mktcap"))
                     else None
                 ),
-                "turnover_rate": _safe_float(item.get("turnoverratio")),
+                "turnover_rate": safe_float(item.get("turnoverratio")),
                 "industry": None,   # 新浪不返回行业
                 "high_60d": None,   # 新浪不返回60日涨跌幅
             }
@@ -274,7 +198,7 @@ async def fetch_spot_data(force: bool = False) -> Optional[pd.DataFrame]:
     """
     # 检查缓存
     if not force:
-        cached = await _get_cache("spot")
+        cached = await get_cache("spot")
         if cached is not None and len(cached) > 100:
             logger.info(f"使用缓存行情数据 ({len(cached)} 只, 有效期内)")
             return pd.DataFrame(cached)
@@ -304,7 +228,7 @@ async def fetch_spot_data(force: bool = False) -> Optional[pd.DataFrame]:
     # —— 兜底：过期缓存 ——
     if result is None or result.empty:
         logger.warning("两路源均失败，尝试过期缓存兜底……")
-        stale = await _get_cache_stale("spot")
+        stale = await get_cache_stale("spot")
         if stale is not None:
             logger.warning("使用过期缓存兜底")
             return pd.DataFrame(stale)
@@ -312,7 +236,7 @@ async def fetch_spot_data(force: bool = False) -> Optional[pd.DataFrame]:
 
     # 缓存并返回
     records = result.to_dict(orient="records")
-    await _set_cache("spot", records, settings.cache_ttl_spot)
+    await set_cache("spot", records, settings.cache_ttl_spot)
     logger.info(f"全市场行情已缓存：{len(result)} 只股票")
     return result
 
@@ -328,10 +252,13 @@ async def fetch_financial_data(force: bool = False) -> Optional[pd.DataFrame]:
       销售毛利率   → gross_margin
       营业总收入-同比增长 → revenue_growth
       净利润-同比增长 → profit_growth
+      营业总收入   → revenue
+      净利润       → profit
+      每股经营现金流量 → cf_ps
     """
-    # 检查缓存
+    # 检查缓存（v2：缓存内容新增 year/revenue/profit/cf_ps 字段，版本号避免旧缓存缺列）
     if not force:
-        cached = await _get_cache("financial")
+        cached = await get_cache("financial_v2")
         if cached is not None:
             logger.info(f"使用缓存财报数据 ({len(cached)} 条, 有效期内)")
             return pd.DataFrame(cached)
@@ -343,10 +270,12 @@ async def fetch_financial_data(force: bool = False) -> Optional[pd.DataFrame]:
     all_dfs: list[pd.DataFrame] = []
     for year in years:
         try:
-            df = await _akshare_with_retry(
+            df = await akshare_with_retry(
                 "financial", ak.stock_yjbb_em, date=f"{year}1231"
             )
             if df is not None and not df.empty:
+                df = df.copy()
+                df["year"] = year  # 标记报告年份，供筛选/详情页选择最新一期
                 all_dfs.append(df)
                 logger.info(f"  财报 {year} 年: {len(df)} 条")
             else:
@@ -356,7 +285,7 @@ async def fetch_financial_data(force: bool = False) -> Optional[pd.DataFrame]:
 
     if not all_dfs:
         logger.error("所有年份财报获取失败")
-        stale = await _get_cache_stale("financial")
+        stale = await get_cache_stale("financial_v2")
         if stale is not None:
             logger.warning("使用过期财报缓存兜底")
             return pd.DataFrame(stale)
@@ -365,7 +294,7 @@ async def fetch_financial_data(force: bool = False) -> Optional[pd.DataFrame]:
     df_all = pd.concat(all_dfs, ignore_index=True)
     result = _normalize_financial(df_all)
     records = result.to_dict(orient="records")
-    await _set_cache("financial", records, settings.cache_ttl_financial)
+    await set_cache("financial_v2", records, settings.cache_ttl_financial)
     logger.info(f"财报数据已缓存：{len(result)} 条记录")
     return result
 
@@ -412,7 +341,20 @@ def _normalize_financial(df_all: pd.DataFrame) -> pd.DataFrame:
         pd.to_numeric(result[profit_col], errors="coerce")
         if profit_col else None
     )
-    keep = ["code", "roe", "gross_margin", "revenue_growth", "profit_growth"]
+    # 营收（用于 PS 估值因子）
+    result["revenue"] = pd.to_numeric(
+        result.get("营业总收入", None), errors="coerce"
+    )
+    # 净利润（用于个股财务历史展示）
+    result["profit"] = pd.to_numeric(
+        result.get("净利润", None), errors="coerce"
+    )
+    # 每股经营现金流量（质量因子中的现金流子因子）
+    result["cf_ps"] = pd.to_numeric(
+        result.get("每股经营现金流量", None), errors="coerce"
+    )
+    keep = ["code", "year", "roe", "gross_margin", "revenue_growth",
+            "profit_growth", "revenue", "profit", "cf_ps"]
     return result[[c for c in keep if c in result.columns]]
 
 
@@ -427,17 +369,17 @@ async def fetch_dividend_data(force: bool = False) -> Optional[pd.DataFrame]:
       年均股息 → avg_dividend_per_10（单位：元/10股）
     """
     if not force:
-        cached = await _get_cache("dividend")
+        cached = await get_cache("dividend")
         if cached is not None:
             logger.info(f"使用缓存分红数据 ({len(cached)} 条, 有效期内)")
             return pd.DataFrame(cached)
 
     logger.info("开始获取分红数据……")
     try:
-        df = await _akshare_with_retry("dividend", ak.stock_history_dividend)
+        df = await akshare_with_retry("dividend", ak.stock_history_dividend)
     except Exception as e:
         logger.error(f"获取分红数据完全失败: {e}")
-        stale = await _get_cache_stale("dividend")
+        stale = await get_cache_stale("dividend")
         if stale is not None:
             logger.warning("使用过期分红缓存兜底")
             return pd.DataFrame(stale)
@@ -449,7 +391,7 @@ async def fetch_dividend_data(force: bool = False) -> Optional[pd.DataFrame]:
 
     result = _normalize_dividend(df)
     records = result.to_dict(orient="records")
-    await _set_cache("dividend", records, settings.cache_ttl_dividend)
+    await set_cache("dividend", records, settings.cache_ttl_dividend)
     logger.info(f"分红数据已缓存：{len(result)} 条记录")
     return result
 
@@ -467,223 +409,3 @@ def _normalize_dividend(df: pd.DataFrame) -> pd.DataFrame:
     )
     return result[["code", "avg_dividend_per_10"]]
 
-
-# ========================================================================
-# 4. 前复权 K 线（akshare 东方财富源 stock_zh_a_hist → Sina 降级）
-#    缓存 key: "{code}_{months}", TTL: 4h
-# ========================================================================
-_kline_cache: dict[str, tuple[float, list[dict]]] = {}
-_KLINE_CACHE_TTL = 14400  # 4 秒改成 4小时
-
-async def fetch_kline_data(code: str, months: int = 12) -> Optional[list[dict]]:
-    """获取个股前复权 K 线数据（含 MA5/MA20/MA60）。
-
-    策略：内存缓存(4h) → akshare qfq → Sina K线 API → None
-    """
-    cache_key = f"{code}_{months}"
-
-    # 1. 检查内存缓存
-    now = time.monotonic()
-    cached = _kline_cache.get(cache_key)
-    if cached and (now - cached[0]) < _KLINE_CACHE_TTL:
-        logger.debug(f"  {cache_key} K线缓存命中")
-        return cached[1]
-
-    code_z = code.zfill(6)
-    end_date = datetime.now().strftime("%Y%m%d")
-    start_dt = datetime.now() - timedelta(days=months * 31)
-    start_date = start_dt.strftime("%Y%m%d")
-
-    result = None
-
-    # 2. 方案A: akshare 东方财富（前复权）
-    async def _fetch_em():
-        await _rate_limit("kline")
-        return await _run_akshare(
-            ak.stock_zh_a_hist,
-            symbol=code_z,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq",
-        )
-
-    try:
-        df = await _fetch_em()
-        if df is not None and not df.empty:
-            result = _build_kline(df, date_col="日期", open_col="开盘",
-                                  high_col="最高", low_col="最低", close_col="收盘",
-                                  volume_col="成交量")
-    except Exception as e:
-        logger.warning(f"  {code_z} 东方财富K线失败: {e}")
-
-    # 3. 方案B: Sina K线 API（未复权，但稳定可用）
-    if result is None:
-        logger.info(f"  → 降级到 Sina K线: {code_z}")
-        try:
-            result = await _fetch_kline_sina(code_z, months)
-        except Exception as e:
-            logger.warning(f"  {code_z} Sina K线也失败: {e}")
-
-    # 4. 写缓存（不管哪个源来的，都缓存 4h）
-    if result is not None:
-        _kline_cache[cache_key] = (time.monotonic(), result)
-
-    return result
-
-
-def _symbol_sina(code: str) -> str:
-    """A股代码转新浪symbol格式：sh600004 / sz000001"""
-    if code.startswith("6") or code.startswith("9"):
-        return f"sh{code}"
-    return f"sz{code}"
-
-
-async def _fetch_kline_sina(code: str, months: int) -> Optional[list[dict]]:
-    """通过新浪日K线API获取数据（scale=240 = 日线）"""
-    symbol = _symbol_sina(code)
-    # 最多取 1023 根日K（约4年）
-    datalen = min(max(months * 20, 60), 1023)
-
-    url = ("https://vip.stock.finance.sina.com.cn/quotes_service"
-           "/api/json_v2.php/CN_MarketData.getKLineData")
-    params = {"symbol": symbol, "scale": 240, "datalen": datalen}
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        raw = resp.json()
-
-    if not isinstance(raw, list) or len(raw) == 0:
-        return None
-
-    # 解析并筛选时间范围
-    from datetime import datetime as dt
-    cutoff = datetime.now() - timedelta(days=months * 31)
-
-    rows = []
-    for item in raw:
-        try:
-            day = item.get("day", "")
-            if not day or (len(day) >= 10 and dt.strptime(day[:10], "%Y-%m-%d") < cutoff):
-                continue
-            rows.append({
-                "date": day[:10],
-                "open": _safe_float(item.get("open"), 0.0),
-                "high": _safe_float(item.get("high"), 0.0),
-                "low": _safe_float(item.get("low"), 0.0),
-                "close": _safe_float(item.get("close"), 0.0),
-                "volume": _safe_float(item.get("volume"), 0.0),
-                "ma5": _safe_float(item.get("ma_price5")),
-                "ma20": _safe_float(item.get("ma_price10")),  # Sina MA10 ≈ MA20
-                "ma60": _safe_float(item.get("ma_price30")),  # Sina MA30 ≈ MA60
-            })
-        except Exception:
-            continue
-
-    # 按日期升序
-    rows.sort(key=lambda r: r["date"])
-    logger.info(f"  Sina K线 {code}: {len(rows)} 个交易日")
-    return rows
-
-
-def _build_kline(df: pd.DataFrame, **col_map) -> list[dict]:
-    """从 DataFrame 构建标准 K 线输出，含 MA5/MA20/MA60。"""
-    df = df.sort_values(col_map["date_col"])
-    close_series = df[col_map["close_col"]].astype(float)
-
-    def _ma(n: int) -> list:
-        return (close_series.rolling(window=n).mean().round(2).tolist()
-                if len(close_series) >= n else [None] * len(close_series))
-
-    ma5 = _ma(5)
-    ma20 = _ma(20)
-    ma60 = _ma(60)
-
-    rows = []
-    for i in range(len(df)):
-        r = df.iloc[i]
-        rows.append({
-            "date": str(r[col_map["date_col"]]),
-            "open": _clean_float(r[col_map["open_col"]]),
-            "high": _clean_float(r[col_map["high_col"]]),
-            "low": _clean_float(r[col_map["low_col"]]),
-            "close": _clean_float(r[col_map["close_col"]]),
-            "volume": _clean_float(r[col_map["volume_col"]]),
-            "ma5": _clean_float(ma5[i]),
-            "ma20": _clean_float(ma20[i]),
-            "ma60": _clean_float(ma60[i]),
-        })
-    return rows
-
-
-def _clean_float(val) -> Optional[float]:
-    """转换为 float，NaN/Inf → None（JSON 安全）"""
-    try:
-        v = float(val)
-        if v != v or v == float("inf") or v == float("-inf"):
-            return None
-        return round(v, 4)
-    except (ValueError, TypeError):
-        return None
-
-
-# ========================================================================
-# 5. 缓存操作
-# ========================================================================
-async def _get_cache(cache_type: str) -> Optional[list]:
-    """读取有效缓存（未过期）。"""
-    return await _get_cache_impl(cache_type, check_expiry=True)
-
-
-async def _get_cache_stale(cache_type: str) -> Optional[list]:
-    """读取任意缓存（即使已过期）。"""
-    return await _get_cache_impl(cache_type, check_expiry=False)
-
-
-async def _get_cache_impl(cache_type: str, check_expiry: bool) -> Optional[list]:
-    from sqlalchemy import select as sa_select
-    async with async_session() as session:
-        stmt = (
-            sa_select(StockCache)
-            .where(StockCache.cache_type == cache_type)
-            .order_by(StockCache.id.desc())
-            .limit(1)
-        )
-        result = await session.execute(stmt)
-        cache = result.scalar_one_or_none()
-        if cache and (not check_expiry or cache.expires_at > datetime.now()):
-            return json.loads(cache.data_json)
-        return None
-
-
-async def _set_cache(cache_type: str, data: Any, ttl_seconds: int):
-    """写入缓存（先清旧记录）。"""
-    async with async_session() as session:
-        await session.execute(
-            delete(StockCache).where(StockCache.cache_type == cache_type)
-        )
-        expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
-        cache = StockCache(
-            cache_type=cache_type,
-            data_json=json.dumps(data, ensure_ascii=False, default=str),
-            expires_at=expires_at,
-        )
-        session.add(cache)
-        await session.commit()
-
-
-# ========================================================================
-# 工具函数
-# ========================================================================
-def _safe_float(val, default=None):
-    """安全的浮点数转换，处理 NaN、Inf 等边界情况。"""
-    if val is None:
-        return default
-    try:
-        v = float(val)
-        if v != v or v == float("inf") or v == float("-inf"):
-            return default
-        return v
-    except (ValueError, TypeError):
-        return default

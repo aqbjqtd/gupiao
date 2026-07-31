@@ -54,21 +54,6 @@ class ScreenResult(Base):
     refreshed_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 
-class FinancialData(Base):
-    """个股季度财务数据"""
-    __tablename__ = "financial_data"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(6), index=True)
-    quarter: Mapped[str] = mapped_column(String(16))  # e.g. "2024Q1"
-    revenue: Mapped[float] = mapped_column(Float, nullable=True)
-    profit: Mapped[float] = mapped_column(Float, nullable=True)
-    roe: Mapped[float] = mapped_column(Float, nullable=True)
-    gross_margin: Mapped[float] = mapped_column(Float, nullable=True)
-    revenue_growth: Mapped[float] = mapped_column(Float, nullable=True)
-    profit_growth: Mapped[float] = mapped_column(Float, nullable=True)
-
-
 async def init_db():
     """创建表"""
     async with engine.begin() as conn:

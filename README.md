@@ -24,20 +24,25 @@ gupiao/
 │   │   ├── routers/
 │   │   │   └── stocks.py   # API 路由
 │   │   └── services/
-│   │       ├── data_fetcher.py  # 双源数据获取（akshare→新浪降级）
+│   │       ├── data_fetcher.py  # 行情/财报/分红抓取（akshare→新浪降级）
+│   │       ├── kline.py         # 前复权 K 线 + 内存缓存
 │   │       ├── screener.py      # 五维筛选引擎
-│   │       └── scheduler.py     # 定时调度 + 刷新防抖
+│   │       ├── scheduler.py     # 定时调度 + 刷新防抖
+│   │       ├── cache.py         # SQLite 缓存读写
+│   │       ├── rate_limit.py    # 限速 + 指数退避重试
+│   │       └── numeric.py       # 数值清洗（NaN/Inf 安全）
+│   ├── tests/                 # pytest 单元测试
 │   └── requirements.txt
 ├── frontend/                # React 前端
 │   ├── src/
 │   │   ├── pages/          # 页面：Home + StockDetail
 │   │   ├── components/     # StockTable, KLineChart, StockCard
 │   │   ├── api/            # API 封装
+│   │   ├── lib/            # echarts 按需注册
 │   │   └── styles/         # 深色金融主题 CSS
 │   └── package.json
 ├── docker-compose.yml       # 单容器部署（默认）
 ├── Dockerfile.allinone      # 多阶段构建（前端+后端合并）
-├── nginx.conf               # 仅旧双容器方案需要
 └── README.md
 ```
 
@@ -94,6 +99,14 @@ uvicorn app.main:app --reload --port 8000
 cd frontend
 npm install
 npm run dev
+```
+
+### 运行测试
+
+```bash
+cd backend
+uv pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
 ```
 
 ## API 端点
