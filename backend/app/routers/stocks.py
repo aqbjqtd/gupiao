@@ -17,6 +17,11 @@ from app.schemas import StockItem, KlineResponse, StockDetail, RefreshStatus
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# 冷缓存下网络抓取可能很慢，详情页/图表接口不应被阻塞：
+# 财报历史超时则返回空数组，K 线超时则返回明确的 504
+_FINANCIAL_FETCH_TIMEOUT = 10.0  # 秒
+_KLINE_FETCH_TIMEOUT = 15.0      # 秒
+
 
 @router.get("/health")
 async def health():
@@ -46,7 +51,8 @@ async def get_stock_detail(code: str):
     if not stock:
         raise HTTPException(status_code=404, detail="股票不存在")
 
-    financials = await _get_financial_history(code)
+    # 财务历史由前端单独请求 /financial，避免冷缓存抓取阻塞详情页
+    financials = []
 
     return StockDetail(
         code=stock.code,
@@ -80,7 +86,12 @@ async def get_kline(code: str, months: int = Query(12, ge=1, le=60)):
     if not stock:
         raise HTTPException(status_code=404, detail="股票不存在")
 
-    data = await fetch_kline_data(code, months=months)
+    try:
+        data = await asyncio.wait_for(
+            fetch_kline_data(code, months=months), timeout=_KLINE_FETCH_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="获取 K 线数据超时，请稍后重试")
     if data is None:
         raise HTTPException(status_code=500, detail="获取 K 线数据失败")
 
@@ -132,7 +143,16 @@ def _clean_json_float(val):
 
 async def _get_financial_history(code: str) -> list[dict]:
     """从财报缓存取该股最近几期数据（含报告年份）。"""
-    fin_df = await fetch_financial_data()
+    try:
+        fin_df = await asyncio.wait_for(
+            fetch_financial_data(), timeout=_FINANCIAL_FETCH_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"财报历史获取超时（>{_FINANCIAL_FETCH_TIMEOUT}s），详情页跳过财务数据")
+        return []
+    except Exception as e:
+        logger.warning(f"财报历史获取失败: {e}")
+        return []
     if fin_df is None or fin_df.empty or "year" not in fin_df.columns:
         return []
     stock_fin = fin_df[fin_df["code"] == code]

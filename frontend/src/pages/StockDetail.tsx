@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { fetchStockDetail, fetchKline, StockDetail, KlineResponse, FinancialHistoryItem } from '../api/stocks';
+import {
+  fetchStockDetail,
+  fetchKline,
+  fetchFinancials,
+  StockDetail,
+  KlineResponse,
+  FinancialHistoryItem,
+} from '../api/stocks';
 import StockCard from '../components/StockCard';
 import KLineChart from '../components/KLineChart';
 import { echarts } from '../lib/echarts';
@@ -12,8 +19,10 @@ export default function StockDetailPage() {
   const [detail, setDetail] = useState<StockDetail | null>(null);
   const [kline, setKline] = useState<KlineResponse | null>(null);
   const [months, setMonths] = useState(12);
+  const [financials, setFinancials] = useState<FinancialHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [klineLoading, setKlineLoading] = useState(false);
+  const [finLoading, setFinLoading] = useState(true);
   const radarRef = useRef<HTMLDivElement>(null);
   const radarInstance = useRef<EChartsType | null>(null);
 
@@ -34,6 +43,16 @@ export default function StockDetailPage() {
       .catch(() => {})
       .finally(() => setKlineLoading(false));
   }, [code, months]);
+
+  // 财务历史异步加载，不影响详情页首屏渲染
+  useEffect(() => {
+    if (!code) return;
+    setFinLoading(true);
+    fetchFinancials(code)
+      .then(setFinancials)
+      .catch(() => setFinancials([]))
+      .finally(() => setFinLoading(false));
+  }, [code]);
 
   // 雷达图
   useEffect(() => {
@@ -123,8 +142,10 @@ export default function StockDetailPage() {
         <div className="error-banner">K 线数据加载失败</div>
       )}
 
-      {/* 财务数据 */}
-      {detail.financials && detail.financials.length > 0 && (
+      {/* 财务数据（异步加载） */}
+      {finLoading ? (
+        <div className="loading">财务数据加载中……</div>
+      ) : financials.length > 0 ? (
         <div className="financial-section">
           <h3>财务数据（最近 4 季度）</h3>
           <div className="table-wrapper">
@@ -141,7 +162,7 @@ export default function StockDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {detail.financials.map((f: FinancialHistoryItem, i: number) => (
+                {financials.map((f: FinancialHistoryItem, i: number) => (
                   <tr key={i}>
                     <td>{f.quarter || '—'}</td>
                     <td className="mono">{f.revenue?.toFixed(2) ?? '—'}</td>
@@ -156,7 +177,7 @@ export default function StockDetailPage() {
             </table>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

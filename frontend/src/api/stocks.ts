@@ -84,6 +84,10 @@ export async function fetchKline(code: string, months: number = 12): Promise<Kli
   return request<KlineResponse>(`/stocks/${code}/kline?months=${months}`);
 }
 
+export async function fetchFinancials(code: string): Promise<FinancialHistoryItem[]> {
+  return request<FinancialHistoryItem[]>(`/stocks/${code}/financial`);
+}
+
 export async function fetchRefreshStatus(): Promise<RefreshStatus> {
   return request<RefreshStatus>('/refresh/status');
 }
