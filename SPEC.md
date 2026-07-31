@@ -50,7 +50,7 @@ fetch_kline_data(code)
 ├─ [主源] ak.stock_zh_a_hist(adjust='qfq') 前复权
 │    └─ 失败一次 → 立即降级
 └─ [降级] Sina CN_MarketData.getKLineData(scale=240)
-     └─ 日K线，含MA5/MA10/MA30
+     └─ 日K线，MA5/20/60 由本地按收盘价计算（新浪接口仅提供 MA5/10/30）
 
 fetch_financial_data()
 └─ ak.stock_yjbb_em() 财报（含重试）

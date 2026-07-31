@@ -126,15 +126,45 @@ async def _fetch_kline_sina(code: str, months: int) -> Optional[list[dict]]:
 
     # 按日期升序
     rows.sort(key=lambda r: r["date"])
+    _attach_ma(rows)
     logger.info(f"  Sina K线 {code}: {len(rows)} 个交易日")
+    return rows
+
+
+def compute_ma(closes: list[float], n: int) -> list[Optional[float]]:
+    """从收盘价序列计算 n 日均线；数据不足 n 根时对应位置为 None。纯函数。
+
+    新浪接口只提供 MA5/MA10/MA30 字段（没有 MA20/MA60），
+    因此统一由收盘价本地计算，保证两个数据源的 MA 口径一致。
+    """
+    if len(closes) < n:
+        return [None] * len(closes)
+    ma: list[Optional[float]] = []
+    running = 0.0
+    for i, c in enumerate(closes):
+        running += c
+        if i >= n:
+            running -= closes[i - n]
+        ma.append(round(running / n, 4) if i >= n - 1 else None)
+    return ma
+
+
+def _attach_ma(rows: list[dict]) -> list[dict]:
+    """给 K 线行附加本地计算的 MA5/MA20/MA60。"""
+    closes = [r["close"] for r in rows]
+    mas = {n: compute_ma(closes, n) for n in (5, 20, 60)}
+    for i, row in enumerate(rows):
+        row["ma5"] = mas[5][i]
+        row["ma20"] = mas[20][i]
+        row["ma60"] = mas[60][i]
     return rows
 
 
 def parse_sina_kline_row(item: dict, cutoff: datetime) -> Optional[dict]:
     """解析新浪 K 线单行数据（纯函数，便于测试）。
 
-    注意：ma20/ma60 使用新浪接口真实提供的 ma_price20/ma_price60 字段，
-    而不是早期实现的 ma_price10/ma_price30 近似值。
+    MA 字段不在单行解析阶段读取——新浪接口没有 ma_price20/ma_price60，
+    统一由 _attach_ma 基于收盘价本地计算。
     """
     try:
         day = item.get("day", "")
@@ -147,9 +177,6 @@ def parse_sina_kline_row(item: dict, cutoff: datetime) -> Optional[dict]:
             "low": safe_float(item.get("low"), 0.0),
             "close": safe_float(item.get("close"), 0.0),
             "volume": safe_float(item.get("volume"), 0.0),
-            "ma5": safe_float(item.get("ma_price5")),
-            "ma20": safe_float(item.get("ma_price20")),
-            "ma60": safe_float(item.get("ma_price60")),
         }
     except Exception:
         return None

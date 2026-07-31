@@ -6,6 +6,8 @@ import pandas as pd
 
 from app.services.data_fetcher import _normalize_dividend, _normalize_em_spot, _normalize_financial
 from app.services.kline import (
+    _attach_ma,
+    compute_ma,
     parse_sina_kline_row,
     symbol_sina,
     trim_cache,
@@ -78,26 +80,30 @@ def test_clean_float():
     assert safe_float(float("-inf")) is None
 
 
-def test_parse_sina_kline_row_uses_correct_ma_fields():
-    """回归测试：MA20/MA60 必须使用新浪 ma_price20/ma_price60 字段。"""
-    cutoff = datetime.now() - timedelta(days=30)
-    item = {
-        "day": datetime.now().strftime("%Y-%m-%d"),
-        "open": "10.0",
-        "high": "11.0",
-        "low": "9.5",
-        "close": "10.5",
-        "volume": "10000",
-        "ma_price5": "10.1",
-        "ma_price10": "99.9",   # 旧实现误用的字段
-        "ma_price20": "10.3",
-        "ma_price30": "88.8",   # 旧实现误用的字段
-        "ma_price60": "10.4",
-    }
-    row = parse_sina_kline_row(item, cutoff)
-    assert row is not None
-    assert row["ma20"] == 10.3
-    assert row["ma60"] == 10.4
+def test_compute_ma_values():
+    closes = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    ma3 = compute_ma(closes, 3)
+    assert ma3[:2] == [None, None]
+    assert ma3[2] == 2.0   # (1+2+3)/3
+    assert ma3[3] == 3.0   # (2+3+4)/3
+    assert ma3[5] == 5.0   # (4+5+6)/3
+
+
+def test_compute_ma_short_series_returns_none():
+    assert compute_ma([1.0, 2.0], 5) == [None, None]
+    assert compute_ma([], 20) == []
+
+
+def test_attach_ma_adds_ma5_ma20_ma60():
+    """新浪源不提供 ma_price20/ma_price60，必须本地基于收盘价计算。"""
+    closes = [float(i + 1) for i in range(25)]
+    rows = [{"date": f"2025-01-{i + 1:02d}", "close": c} for i, c in enumerate(closes)]
+    result = _attach_ma(rows)
+    assert result[4]["ma5"] == 3.0  # 前 5 日 (1+2+3+4+5)/5
+    assert result[3]["ma5"] is None
+    assert result[19]["ma20"] == 10.5  # (1..20)/20
+    assert result[18]["ma20"] is None
+    assert result[24]["ma60"] is None  # 25 根数据不足以计算 MA60
 
 
 def test_parse_sina_kline_row_skips_old_dates():
