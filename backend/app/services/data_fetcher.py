@@ -447,13 +447,26 @@ def _normalize_financial(df_all: pd.DataFrame) -> pd.DataFrame:
         pd.to_numeric(result[profit_col], errors="coerce")
         if profit_col else None
     )
-    # 营收（用于 PS 估值因子）
-    result["revenue"] = pd.to_numeric(
-        result.get("营业总收入", None), errors="coerce"
+    # 营收（用于 PS 估值因子）——兼容不同版本列名
+    rev_col = (
+        "营业总收入-营业总收入" if "营业总收入-营业总收入" in result.columns
+        else "营业总收入" if "营业总收入" in result.columns
+        else "营业收入" if "营业收入" in result.columns
+        else None
     )
-    # 净利润（用于个股财务历史展示）
-    result["profit"] = pd.to_numeric(
-        result.get("净利润", None), errors="coerce"
+    result["revenue"] = (
+        pd.to_numeric(result[rev_col], errors="coerce")
+        if rev_col else None
+    )
+    # 净利润（用于个股财务历史展示）——兼容不同版本列名
+    profit_col = (
+        "净利润-净利润" if "净利润-净利润" in result.columns
+        else "净利润" if "净利润" in result.columns
+        else None
+    )
+    result["profit"] = (
+        pd.to_numeric(result[profit_col], errors="coerce")
+        if profit_col else None
     )
     # 每股经营现金流量（质量因子中的现金流子因子）
     result["cf_ps"] = pd.to_numeric(
