@@ -72,6 +72,38 @@ def _reverse_percentile_rank(series: pd.Series) -> pd.Series:
     return ranks
 
 
+def _value_factor_series(series: pd.Series) -> pd.Series:
+    """估值因子预处理：封顶缩尾 + 非正值（亏损/资不抵债）排最差。
+
+    负 PE/PB/PS 在反向百分位排名中会垫底得满分，必须剔除：
+    将非正值置为大于所有有效值的占位，使反向排名得 0 分。
+    NaN 保持 NaN（该股估值分缺失 → 总分 NaN → 不入选）。
+    """
+    series = pd.Series(series)  # 归一化（df[] 可能被类型检查器判为 DataFrame）
+    q95 = series.quantile(0.95)
+    if pd.isna(q95):
+        return series
+    capped = series.clip(upper=q95)
+    return capped.mask(capped <= 0, q95 * 1.5)
+
+
+def _turnover_quality_score(tr: pd.Series) -> pd.Series:
+    """换手率 U 型打分：最优区间 [0.5%, 20%] 高分带，两侧线性衰减。
+
+    低于 0.5% 视为流动性差，高于 20% 视为过度投机：
+      0   → 0 分，0.5 → 0.5（低端线性爬升）
+      20  → 20，40 → 0，更高归零（高端线性衰减）
+    返回值参与百分位排名（越高越好），单调保证远离区间得分越低。
+    """
+    vals = tr.to_numpy()
+    low = vals < 0.5
+    high = vals > 20
+    out = vals.copy()
+    out[low] = vals[low]  # 0→0, 0.5→0.5
+    out[high] = np.clip(20 - (vals[high] - 20), 0, 20)  # 20→20, 40→0
+    return pd.Series(out, index=tr.index)
+
+
 def run_screener(spot_df: pd.DataFrame, fin_df: pd.DataFrame,
                  div_df: pd.DataFrame) -> pd.DataFrame:
     """五维选股主流程：合并数据 → 硬过滤 → 评分 → TopN"""
@@ -192,10 +224,10 @@ def _calculate_scores(df: pd.DataFrame) -> Dict[str, pd.Series]:
                           + div_consistency * SUB_WEIGHTS["dividend"]["dividend_consistency"])
 
     # ---- 估值评分（越低越好） ----
-    pe_score = _reverse_percentile_rank(df["pe"].clip(upper=df["pe"].quantile(0.95)))
-    pb_score = _reverse_percentile_rank(df["pb"].clip(upper=df["pb"].quantile(0.95)))
+    pe_score = _reverse_percentile_rank(_value_factor_series(df["pe"]))
+    pb_score = _reverse_percentile_rank(_value_factor_series(df["pb"]))
     ps_col = df["ps"] if df["ps"].notna().any() else df["pe"]
-    ps_score = _reverse_percentile_rank(ps_col.clip(upper=ps_col.quantile(0.95)))
+    ps_score = _reverse_percentile_rank(_value_factor_series(ps_col))
     result["value"] = (pe_score * SUB_WEIGHTS["value"]["pe"]
                        + pb_score * SUB_WEIGHTS["value"]["pb"]
                        + ps_score * SUB_WEIGHTS["value"]["ps"])
@@ -207,11 +239,18 @@ def _calculate_scores(df: pd.DataFrame) -> Dict[str, pd.Series]:
                         + pro_score * SUB_WEIGHTS["growth"]["profit_growth"])
 
     # ---- 动量评分 ----
-    ret60_score = _percentile_rank(df["high_60d"].fillna(0))
-    tr = df["turnover_rate"].fillna(0)
-    tr_score = _percentile_rank(
-        tr.where((tr >= 0.5) & (tr <= 20), other=tr * 0.5)
-    )
+    # high_60d（60日涨跌幅）全缺失时（新浪降级源无此字段）：
+    # 静默 fillna(0) 会让全部股票并列，动量子因子失效。
+    # 降级用当日涨跌幅 change_pct 近似，并打日志。
+    ret60_raw = pd.Series(df["high_60d"])
+    if bool(ret60_raw.notna().any()):
+        ret60_score = _percentile_rank(ret60_raw.fillna(0))
+    else:
+        logger.warning("high_60d 全部缺失（新浪降级源），动量子因子降级用 change_pct 近似")
+        ret60_score = _percentile_rank(pd.Series(df["change_pct"]).fillna(0))
+    tr = pd.Series(df["turnover_rate"]).fillna(0)
+    # 换手率质量：U 型打分，最优区间 0.5-20%，两侧线性衰减
+    tr_score = _percentile_rank(_turnover_quality_score(tr))
     result["momentum"] = (ret60_score * SUB_WEIGHTS["momentum"]["return_60d"]
                           + tr_score * SUB_WEIGHTS["momentum"]["turnover_quality"])
 

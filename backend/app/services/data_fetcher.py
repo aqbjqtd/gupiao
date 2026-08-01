@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # ========================================================================
-# 1. 全市场实时行情：东方财富（akshare）优先 → Sina API 降级
+# 1. 全市场实时行情：东方财富（akshare）优先 → Sina API 降级 → 腾讯降级
 # ========================================================================
 
 # ---- 东方财富源（主）----
@@ -185,16 +185,108 @@ def _normalize_sina_spot(data: list[dict]) -> pd.DataFrame:
     return df
 
 
+# ---- 腾讯源（第二降级，字段较全含 60 日涨跌幅，仅缺行业）----
+
+TENCENT_RANK_URL = (
+    "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
+)
+
+
+async def _fetch_spot_tencent() -> Optional[pd.DataFrame]:
+    """通过腾讯财经获取全市场行情（第二降级方案）。
+
+    与新浪相比：含 60 日涨跌幅（zdf_d60），但同样缺行业字段。
+    board_code=aStock 全 A 股，分页拉取。
+    """
+    logger.info("[腾讯源] 开始获取全市场实时行情（第二降级方案）……")
+    all_stocks: list[dict] = []
+    offset = 0
+    page_size = 100
+
+    async def _fetch_all():
+        nonlocal all_stocks, offset
+        while True:
+            await rate_limit("tencent_spot")
+            params = {
+                "board_code": "aStock",
+                "sort_type": "price",
+                "direct": "down",
+                "offset": offset,
+                "count": page_size,
+            }
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(TENCENT_RANK_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            ranks = data.get("data", {}).get("rank_list") or []
+            if not ranks:
+                break
+            all_stocks.extend(ranks)
+            total = data.get("data", {}).get("total", 0)
+            offset += len(ranks)
+            logger.debug(f"  腾讯第{offset // page_size}页: {len(ranks)} 只 (共{total})")
+            if offset >= total:
+                break
+        return all_stocks
+
+    try:
+        all_stocks = await async_retry(_fetch_all)
+    except Exception as e:
+        logger.error(f"[腾讯源] 完全失败: {e}")
+        return None
+
+    if not all_stocks:
+        return None
+
+    logger.info(f"[腾讯源] 成功获取 {len(all_stocks)} 只股票原始数据")
+    return _normalize_tencent_spot(all_stocks)
+
+
+def _normalize_tencent_spot(data: list[dict]) -> pd.DataFrame:
+    """标准化腾讯行情数据。
+
+    注意：腾讯不返回行业(industry)，设为 None；其余字段齐全。
+      code: sh600519 → 600519
+      zxj: 最新价, zdf: 涨跌幅, pe_ttm: PE, pn: 市净率
+      zsz: 总市值(亿), hsl: 换手率, zdf_d60: 60日涨跌幅
+    """
+    rows = []
+    for item in data:
+        try:
+            raw_code = str(item.get("code", ""))
+            code = raw_code[-6:] if len(raw_code) >= 6 else raw_code.zfill(6)
+            rows.append({
+                "code": code,
+                "name": str(item.get("name", "")),
+                "price": safe_float(item.get("zxj")),
+                "change_pct": safe_float(item.get("zdf")),
+                "pe": safe_float(item.get("pe_ttm")),
+                "pb": safe_float(item.get("pn")),
+                "market_cap": safe_float(item.get("zsz")),   # 单位已是亿
+                "turnover_rate": safe_float(item.get("hsl")),
+                "industry": None,   # 腾讯不返回行业
+                "high_60d": safe_float(item.get("zdf_d60")),  # 60日涨跌幅
+            })
+        except Exception:
+            continue
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df[df["code"].notna() & df["name"].notna()]
+    return df
+
+
 # ---- 对外接口 ----
 
 async def fetch_spot_data(force: bool = False) -> Optional[pd.DataFrame]:
     """获取全市场实时行情。
-    
+
     策略：
       1. 缓存有效 → 直接返回
       2. 东方财富源（akshare）优先，全字段含行业/60日涨跌幅
       3. 东方财富失败 → Sina API 降级（缺少行业/60日涨跌幅）
-      4. 全失败 → 过期缓存兜底
+      4. Sina 失败 → 腾讯源降级（缺少行业，含60日涨跌幅）
+      5. 全失败 → 过期缓存兜底
     """
     # 检查缓存
     if not force:
@@ -214,7 +306,7 @@ async def fetch_spot_data(force: bool = False) -> Optional[pd.DataFrame]:
     except Exception as e:
         logger.warning(f"✗ 东方财富源失败: {e}")
 
-    # —— 降级：新浪源 ——
+    # —— 降级1：新浪源 ——
     if not em_ok:
         logger.info("→ 降级到新浪源……")
         try:
@@ -222,12 +314,23 @@ async def fetch_spot_data(force: bool = False) -> Optional[pd.DataFrame]:
             if result is not None and not result.empty:
                 logger.info(f"✓ 新浪源成功：{len(result)} 只股票（缺少 industry/high_60d 字段）")
         except Exception as e:
-            logger.error(f"✗ 新浪源也失败: {e}")
+            logger.error(f"✗ 新浪源失败: {e}")
+            result = None
+
+    # —— 降级2：腾讯源 ——
+    if result is None or result.empty:
+        logger.info("→ 降级到腾讯源……")
+        try:
+            result = await _fetch_spot_tencent()
+            if result is not None and not result.empty:
+                logger.info(f"✓ 腾讯源成功：{len(result)} 只股票（缺少 industry 字段）")
+        except Exception as e:
+            logger.error(f"✗ 腾讯源失败: {e}")
             result = None
 
     # —— 兜底：过期缓存 ——
     if result is None or result.empty:
-        logger.warning("两路源均失败，尝试过期缓存兜底……")
+        logger.warning("三路源均失败，尝试过期缓存兜底……")
         stale = await get_cache_stale("spot")
         if stale is not None:
             logger.warning("使用过期缓存兜底")
@@ -265,7 +368,10 @@ async def fetch_financial_data(force: bool = False) -> Optional[pd.DataFrame]:
 
     logger.info("开始获取季度财报数据……")
     current_year = datetime.now().year
-    years = [current_year, current_year - 1]
+    # 年报披露截止次年 4 月 30 日：任何时候当前年的年报都尚未披露，
+    # 直接拉 current_year 必然返回空（akshare 抛 TypeError 且重试 5 次浪费 30s）。
+    # 用最近两个已披露年报：current_year-1 和 current_year-2。
+    years = [current_year - 1, current_year - 2]
 
     all_dfs: list[pd.DataFrame] = []
     for year in years:

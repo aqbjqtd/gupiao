@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     data_dir: str = "./data"
 
     # 缓存有效期（秒）
-    cache_ttl_spot: int = 14400       # 行情 4 小时
-    cache_ttl_financial: int = 86400  # 财报 24 小时
-    cache_ttl_dividend: int = 86400   # 分红 24 小时
+    cache_ttl_spot: int = 14400        # 行情 4 小时（双源+腾讯三源降级，短 TTL 安全）
+    cache_ttl_financial: int = 604800  # 财报 7 天（季度数据，长缓存降低东财依赖/封禁风险）
+    cache_ttl_dividend: int = 2592000  # 分红 30 天（年度数据）
 
     # akshare 调用间隔（秒）—— 基础值 3s，实际加 0-3s 随机抖动（最终 3-6s）
     # 东方财富源有严格的速率限制，间隔过低会被断开连接

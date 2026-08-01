@@ -68,6 +68,11 @@ async def async_retry(fn: Callable, *args, **kwargs):
             return await fn(*args, **kwargs)
         except Exception as e:  # noqa: BLE001 - 重试语义需要捕获全部异常
             last_exc = e
+            # 空数据类异常（如 akshare 解析 result=None 抛 TypeError）
+            # 重试无意义，直接快速失败——否则每次多浪费 ~30s
+            if isinstance(e, (TypeError, ValueError, KeyError)):
+                logger.warning(f"请求返回异常数据（不重试）: {str(e)[:120]}")
+                raise
             if attempt < max_attempts:
                 cap = backoff_cap(attempt, base_delay, max_delay)
                 sleep_sec = random.uniform(0, cap)

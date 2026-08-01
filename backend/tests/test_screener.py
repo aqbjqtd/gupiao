@@ -215,3 +215,61 @@ def test_scores_return_same_length_as_input():
 def test_np_import_available():
     # 防止未来误删 numpy 依赖导致筛选引擎崩溃
     assert np is not None
+
+
+def test_negative_pe_gets_worst_value_score():
+    """回归：负 PE（亏损股）在 pe 子因子必须垫底，不能反向拿满分。"""
+    from app.services.screener import _reverse_percentile_rank, _value_factor_series
+
+    pe = pd.Series([10.0, 6.0, 50.0, 15.0, -5.0])  # 600005 改为负 PE
+    processed = _value_factor_series(pe)
+    # 负值被映射为大于所有有效值的占位
+    assert processed.max() == processed.iloc[4]
+    assert processed.iloc[4] > processed.iloc[0]
+    score = _reverse_percentile_rank(processed)
+    # 负 PE 股反向排名垫底（0 分），最小 PE 股得最高分
+    assert score.iloc[4] == 0
+    assert score.iloc[1] == score.max()  # pe=6 最小 → 反向最高分
+
+
+def test_momentum_fallback_when_high_60d_missing():
+    """回归：high_60d 全缺失（新浪降级源）时动量子因子用 change_pct 近似，不静默失效。"""
+    df = _spot_df().copy()
+    df["high_60d"] = None  # 模拟新浪降级：无 60 日涨跌幅
+    df = df.merge(
+        _fin_df().sort_values(["code", "year"], ascending=[True, False])
+        .groupby("code").first().reset_index(),
+        on="code", how="left",
+    ).merge(
+        _div_df().groupby("code")["avg_dividend_per_10"].mean()
+        .reset_index()
+        .rename(columns={"avg_dividend_per_10": "avg_dividend"}),
+        on="code", how="left",
+    )
+    df["dividend_yield"] = df["avg_dividend"].fillna(0) / 10.0 / df["price"] * 100
+    df["ps"] = df["market_cap"] * 1e8 / df["revenue"]
+    bad_ps = df["ps"].isna() | np.isinf(df["ps"])
+    df["ps"] = df["ps"].where(~bad_ps, df["pe"])
+
+    scores = _calculate_scores(df)
+    # 降级后动量分仍是有区分度的排名（非全并列），且无 NaN
+    mom = scores["momentum"]
+    assert mom.isna().sum() == 0
+    assert mom.nunique() > 1  # 有区分度，说明不是静默 fillna(0) 全并列
+
+
+def test_turnover_u_shape_penalty():
+    """回归：换手率 U 型惩罚——远离最优区间 [0.5, 20] 单调递减，40% 归零。"""
+    from app.services.screener import _turnover_quality_score
+
+    tr = pd.Series([0.2, 1.0, 8.0, 19.0, 25.0, 40.0])
+    scored = _turnover_quality_score(tr)
+    # 区间内保持原值
+    assert scored.iloc[2] == 8.0
+    assert scored.iloc[3] == 19.0
+    # 高端单调衰减：25 → 15，40 → 0（离 20 越远越低）
+    assert scored.iloc[4] == 15.0
+    assert scored.iloc[4] > scored.iloc[5]
+    assert scored.iloc[5] == 0
+    # 低端线性爬升：0.2 保持低值，低于区间内
+    assert scored.iloc[0] < scored.iloc[1] < scored.iloc[2]
