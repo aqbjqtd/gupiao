@@ -85,6 +85,15 @@ async def run_full_refresh():
 
 def start_scheduler():
     """启动 APScheduler"""
+    # 开盘前刷新（工作日 9:20，集合竞价后——当天买入者第一决策点）
+    scheduler.add_job(
+        run_full_refresh,
+        CronTrigger(hour=9, minute=20, day_of_week='mon-fri'),
+        id="premarket_refresh",
+        replace_existing=True,
+    )
+    logger.info("定时任务已注册：工作日 9:20 开盘前刷新")
+
     # 午盘刷新（工作日 11:30 午盘收盘）
     scheduler.add_job(
         run_full_refresh,
@@ -94,14 +103,14 @@ def start_scheduler():
     )
     logger.info("定时任务已注册：工作日 11:30 午盘刷新")
 
-    # 午后刷新（工作日 14:00 午后走稳）
+    # 尾盘前刷新（工作日 14:30，尾盘方向定型前——当天买入者最后决策点）
     scheduler.add_job(
         run_full_refresh,
-        CronTrigger(hour=14, minute=0, day_of_week='mon-fri'),
+        CronTrigger(hour=14, minute=30, day_of_week='mon-fri'),
         id="afternoon_refresh",
         replace_existing=True,
     )
-    logger.info("定时任务已注册：工作日 14:00 午后刷新")
+    logger.info("定时任务已注册：工作日 14:30 尾盘前刷新")
 
     scheduler.start()
     logger.info("调度器已启动（首次刷新由应用 lifespan 中的 _initial_refresh 延迟 5s 执行）")

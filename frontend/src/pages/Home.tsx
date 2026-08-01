@@ -67,7 +67,7 @@ export default function Home() {
           <h2>
             量化选股 · Top 20
             <span className="title-sub">
-              （数据每个交易日 11:30/14:00 自动更新
+              （数据每个交易日 9:20/11:30/14:30 自动更新
               {lastRefresh && <>, 最近更新：{lastRefresh}</>}）
             </span>
           </h2>
